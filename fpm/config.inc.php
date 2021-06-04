@@ -21,7 +21,10 @@ $vars = array(
     'PMA_PMADB',
     'PMA_CONTROLUSER',
     'PMA_CONTROLPASS',
-    'PMA_QUERYHISTORYDB'
+    'PMA_QUERYHISTORYDB',
+    'PMA_QUERYHISTORYMAX',
+    'MAX_EXECUTION_TIME',
+    'MEMORY_LIMIT'
 );
 foreach ($vars as $var) {
     $env = getenv($var);
@@ -31,6 +34,10 @@ foreach ($vars as $var) {
 }
 if (isset($_ENV['PMA_QUERYHISTORYDB'])) {
     $cfg['QueryHistoryDB'] = boolval($_ENV['PMA_QUERYHISTORYDB']);
+}
+
+if (isset($_ENV['PMA_QUERYHISTORYMAX'])) {
+    $cfg['QueryHistoryMax'] = intval($_ENV['PMA_QUERYHISTORYMAX']);
 }
 
 /* Arbitrary server connection */
@@ -130,6 +137,14 @@ $i--;
 /* Uploads setup */
 $cfg['UploadDir'] = '';
 $cfg['SaveDir'] = '';
+
+if (isset($_ENV['MAX_EXECUTION_TIME'])) {
+    $cfg['ExecTimeLimit'] = $_ENV['MAX_EXECUTION_TIME'];
+}
+
+if (isset($_ENV['MEMORY_LIMIT'])) {
+    $cfg['MemoryLimit'] = $_ENV['MEMORY_LIMIT'];
+}
 
 /* Include User Defined Settings Hook */
 if (file_exists('/etc/phpmyadmin/config.user.inc.php')) {

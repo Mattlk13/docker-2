@@ -1,4 +1,4 @@
-DOCKER_REPO = phpmyadmin/phpmyadmin
+DOCKER_REPO = phpmyadmin
 
 .PHONY: all build run logs clean stop rm prune
 
@@ -17,6 +17,9 @@ build-fpm-alpine:
 
 run:
 	docker-compose -f docker-compose.testing.yml up -d
+
+run-tests:
+	docker-compose exec phpmyadmin /test-docker.sh phpmyadmin_testing 80 phpmyadmin_testing_db
 
 logs:
 	docker-compose -f docker-compose.testing.yml logs

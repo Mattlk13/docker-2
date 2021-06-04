@@ -25,28 +25,35 @@ dockerfileCommit() {
 	)
 }
 
-# depends on docker library
-#getArches() {
-#	local repo="$1"; shift
-#	local officialImagesUrl='https://github.com/docker-library/official-images/raw/master/library/'
-#
-#	eval "declare -g -A parentRepoToArches=( $(
-#		find -name 'Dockerfile' -exec awk '
-#				toupper($1) == "FROM" && $2 !~ /^('"$repo"'|scratch|microsoft\/[^:]+)(:|$)/ {
-#					print "'"$officialImagesUrl"'" $2
-#				}
-#			' '{}' + \
-#			| sort -u \
-#			| xargs bashbrew cat --format '[{{ .RepoName }}:{{ .TagName }}]="{{ join " " .TagEntry.Architectures }}"'
-#	) )"
-#}
-#getArches 'phpmyadmin'
+getArches() {
+	local repo="$1"; shift
+	local officialImagesUrl='https://github.com/docker-library/official-images/raw/master/library/'
+
+	eval "declare -g -A parentRepoToArches=( $(
+		find -name 'Dockerfile' -exec awk '
+				toupper($1) == "FROM" && $2 !~ /^('"$repo"'|scratch|microsoft\/[^:]+)(:|$)/ {
+					print "'"$officialImagesUrl"'" $2
+				}
+			' '{}' + \
+			| sort -u \
+			| xargs bashbrew cat --format '[{{ .RepoName }}:{{ .TagName }}]="{{ join " " .TagEntry.Architectures }}"'
+	) )"
+}
+
+if ! command -v bashbrew --version &> /dev/null
+then
+    echo "bashbrew could not be found"
+	echo "You can download it from Jenkins at https://github.com/docker-library/bashbrew#installing"
+    exit 1
+fi
+
+getArches 'phpmyadmin'
 
 # Header.
 cat <<-EOH
 # This file is generated via https://github.com/phpmyadmin/docker/blob/$(fileCommit "$self")/$self
-Maintainers: Isaac Bennetch <bennetch@gmail.com>
-             Michal Čihař <michal@cihar.com>
+Maintainers: Isaac Bennetch <bennetch@gmail.com> (@ibennetch),
+             William Desportes <williamdes@wdes.fr> (@williamdes)
 GitRepo: https://github.com/phpmyadmin/docker.git
 EOH
 
@@ -57,13 +64,7 @@ join() {
 	echo "${out#$sep}"
 }
 
-latest="$(
-	git ls-remote --tags https://github.com/phpmyadmin/phpmyadmin.git \
-		| cut -d/ -f3 \
-		| grep -vE -- '-rc|-b' \
-		| sort -V \
-		| tail -1
-)"
+latest="$(curl -fsSL 'https://www.phpmyadmin.net/home_page/version.json' | jq -r '.version')"
 
 for variant in apache fpm fpm-alpine; do
 	commit="$(dockerfileCommit "$variant")"
@@ -83,9 +84,7 @@ for variant in apache fpm fpm-alpine; do
 
 	variantParent="$(awk 'toupper($1) == "FROM" { print $2 }' "$variant/Dockerfile")"
 
-	# depends on docker library
-	#variantArches="${parentRepoToArches[$variantParent]}"
-	variantArches="amd64 arm32v7 arm64v8 i386 ppc64le"
+	variantArches="${parentRepoToArches[$variantParent]}"
 
 	cat <<-EOE
 

@@ -1,4 +1,4 @@
-FROM php:7.2-apache
+FROM php:7.4-apache
 
 # Install dependencies
 RUN set -ex; \
@@ -13,10 +13,17 @@ RUN set -ex; \
         libpng-dev \
         libwebp-dev \
         libxpm-dev \
+        libzip-dev \
     ; \
     \
-    docker-php-ext-configure gd --with-freetype-dir=/usr --with-jpeg-dir=/usr --with-webp-dir=/usr --with-png-dir=/usr --with-xpm-dir=/usr; \
-    docker-php-ext-install bz2 gd mysqli opcache zip; \
+    docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp --with-xpm; \
+    docker-php-ext-install -j "$(nproc)" \
+        bz2 \
+        gd \
+        mysqli \
+        opcache \
+        zip \
+    ; \
     \
     apt-mark auto '.*' > /dev/null; \
     apt-mark manual $savedAptMark; \
@@ -33,61 +40,81 @@ RUN set -ex; \
 
 # set recommended PHP.ini settings
 # see https://secure.php.net/manual/en/opcache.installation.php
-RUN { \
+ENV MAX_EXECUTION_TIME 600
+ENV MEMORY_LIMIT 512M
+ENV UPLOAD_LIMIT 2048K
+RUN set -ex; \
+    \
+    { \
         echo 'opcache.memory_consumption=128'; \
         echo 'opcache.interned_strings_buffer=8'; \
         echo 'opcache.max_accelerated_files=4000'; \
         echo 'opcache.revalidate_freq=2'; \
         echo 'opcache.fast_shutdown=1'; \
-        echo 'opcache.enable_cli=1'; \
-    } > /usr/local/etc/php/conf.d/opcache-recommended.ini; \
+    } > $PHP_INI_DIR/conf.d/opcache-recommended.ini; \
     \
     { \
-        echo 'session.cookie_httponly = 1'; \
-        echo 'session.use_strict_mode = 1'; \
-    } > /usr/local/etc/php/conf.d/session-strict.ini; \
+        echo 'session.cookie_httponly=1'; \
+        echo 'session.use_strict_mode=1'; \
+    } > $PHP_INI_DIR/conf.d/session-strict.ini; \
     \
     { \
-        echo 'allow_url_fopen = Off'; \
-        echo 'max_execution_time = 600'; \
-        echo 'memory_limit = 512M'; \
-    } > /usr/local/etc/php/conf.d/phpmyadmin-misc.ini
+        echo 'allow_url_fopen=Off'; \
+        echo 'max_execution_time=${MAX_EXECUTION_TIME}'; \
+        echo 'max_input_vars=10000'; \
+        echo 'memory_limit=${MEMORY_LIMIT}'; \
+        echo 'post_max_size=${UPLOAD_LIMIT}'; \
+        echo 'upload_max_filesize=${UPLOAD_LIMIT}'; \
+    } > $PHP_INI_DIR/conf.d/phpmyadmin-misc.ini
 
 # Calculate download URL
-ENV VERSION 4.9.1
+ENV VERSION 5.1.1
+ENV SHA256 1964d7190223c11e89fa1b7970c618e3a3bae2e859f5f60383f64c3848ef6921
 ENV URL https://files.phpmyadmin.net/phpMyAdmin/${VERSION}/phpMyAdmin-${VERSION}-all-languages.tar.xz
-LABEL version=$VERSION
+
+LABEL org.opencontainers.image.title="Official phpMyAdmin Docker image" \
+    org.opencontainers.image.description="Run phpMyAdmin with Alpine, Apache and PHP FPM." \
+    org.opencontainers.image.authors="The phpMyAdmin Team <developers@phpmyadmin.net>" \
+    org.opencontainers.image.vendor="phpMyAdmin" \
+    org.opencontainers.image.documentation="https://github.com/phpmyadmin/docker#readme" \
+    org.opencontainers.image.licenses="GPL-2.0-only" \
+    org.opencontainers.image.version="${VERSION}" \
+    org.opencontainers.image.url="https://github.com/phpmyadmin/docker#readme" \
+    org.opencontainers.image.source="https://github.com/phpmyadmin/docker.git"
 
 # Download tarball, verify it using gpg and extract
 RUN set -ex; \
-    fetchDeps=" \
+    \
+    savedAptMark="$(apt-mark showmanual)"; \
+    \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
         gnupg \
         dirmngr \
-    "; \
-    apt-get update; \
-    apt-get install -y --no-install-recommends $fetchDeps; \
+    ; \
     \
     export GNUPGHOME="$(mktemp -d)"; \
     export GPGKEY="3D06A59ECE730EB71B511C17CE752F178259BD92"; \
-    curl --output phpMyAdmin.tar.xz --location $URL; \
-    curl --output phpMyAdmin.tar.xz.asc --location $URL.asc; \
+    curl -fsSL -o phpMyAdmin.tar.xz $URL; \
+    curl -fsSL -o phpMyAdmin.tar.xz.asc $URL.asc; \
+    echo "$SHA256 *phpMyAdmin.tar.xz" | sha256sum -c -; \
     gpg --batch --keyserver ha.pool.sks-keyservers.net --recv-keys "$GPGKEY" \
         || gpg --batch --keyserver ipv4.pool.sks-keyservers.net --recv-keys "$GPGKEY" \
         || gpg --batch --keyserver keys.gnupg.net --recv-keys "$GPGKEY" \
         || gpg --batch --keyserver pgp.mit.edu --recv-keys "$GPGKEY" \
         || gpg --batch --keyserver keyserver.pgp.com --recv-keys "$GPGKEY"; \
     gpg --batch --verify phpMyAdmin.tar.xz.asc phpMyAdmin.tar.xz; \
-    tar -xf phpMyAdmin.tar.xz -C /usr/src; \
+    tar -xf phpMyAdmin.tar.xz -C /var/www/html --strip-components=1; \
+    mkdir -p /var/www/html/tmp; \
+    chown www-data:www-data /var/www/html/tmp; \
     gpgconf --kill all; \
     rm -r "$GNUPGHOME" phpMyAdmin.tar.xz phpMyAdmin.tar.xz.asc; \
-    mv /usr/src/phpMyAdmin-$VERSION-all-languages /usr/src/phpmyadmin; \
-    rm -rf /usr/src/phpmyadmin/setup/ /usr/src/phpmyadmin/examples/ /usr/src/phpmyadmin/test/ /usr/src/phpmyadmin/po/ /usr/src/phpmyadmin/composer.json /usr/src/phpmyadmin/RELEASE-DATE-$VERSION; \
-    sed -i "s@define('CONFIG_DIR'.*@define('CONFIG_DIR', '/etc/phpmyadmin/');@" /usr/src/phpmyadmin/libraries/vendor_config.php; \
-# Add directory for sessions to allow session persistence
-    mkdir /sessions; \
-    mkdir -p /var/nginx/client_body_temp; \
+    rm -rf /var/www/html/setup/ /var/www/html/examples/ /var/www/html/test/ /var/www/html/po/ /var/www/html/composer.json /var/www/html/RELEASE-DATE-$VERSION; \
+    sed -i "s@define('CONFIG_DIR'.*@define('CONFIG_DIR', '/etc/phpmyadmin/');@" /var/www/html/libraries/vendor_config.php; \
     \
-    apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false $fetchDeps; \
+    apt-mark auto '.*' > /dev/null; \
+    apt-mark manual $savedAptMark; \
+    apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false; \
     rm -rf /var/lib/apt/lists/*
 
 # Copy configuration
